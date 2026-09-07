@@ -279,14 +279,32 @@
       return out;
     }
 
+    // Verifica se o texto é mesmo um endereço (http/https)
+    const ehURL = (s) => /^https?:\/\//i.test((s || '').trim());
+
+    // Imagem exibida quando não há URL válida na planilha
+    const SEM_IMAGEM =
+      'data:image/svg+xml;charset=utf-8,' +
+      encodeURIComponent(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 400 400">' +
+        '<rect width="400" height="400" fill="#171717"/>' +
+        '<g fill="none" stroke="#404040" stroke-width="2">' +
+        '<rect x="150" y="150" width="100" height="100" rx="8"/>' +
+        '<circle cx="180" cy="180" r="10"/><path d="M158 238l34-34 22 22 20-20 18 18"/></g>' +
+        '<text x="200" y="290" fill="#525252" font-family="sans-serif" font-size="16" text-anchor="middle">sem imagem</text>' +
+        '</svg>'
+      );
+
     // ---------- Card ----------
     function cardHTML(p) {
       const off = desconto(p.precoAntigo, p.precoNovo);
       const temPrecoNovo = p.precoNovo > 0;
       const temPrecoAntigo = p.precoAntigo > 0 && p.precoAntigo > p.precoNovo;
+      const href = ehURL(p.link) ? p.link : '#';
+      const imgSrc = ehURL(p.imagem) ? p.imagem : SEM_IMAGEM;
       return `
         <a
-          href="${p.link}"
+          href="${href}"
           target="_blank"
           rel="noopener sponsored"
           class="group flex flex-col overflow-hidden rounded-xl border border-neutral-800 bg-neutral-950 transition-all duration-200 hover:border-neutral-600"
@@ -294,9 +312,10 @@
           <!-- Imagem -->
           <div class="relative aspect-square overflow-hidden bg-neutral-900">
             <img
-              src="${p.imagem}"
+              src="${imgSrc}"
               alt="${p.nome}"
               loading="lazy"
+              onerror="this.onerror=null;this.src='${SEM_IMAGEM}'"
               class="h-full w-full object-cover transition-transform duration-500 ease-out group-hover:scale-105"
             />
             ${
