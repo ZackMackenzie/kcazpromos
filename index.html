@@ -257,7 +257,9 @@
       const out = [];
       for (let r = 1; r < rows.length; r++) {
         const linha = rows[r];
-        if (!linha || linha.every((c) => !String(c).trim())) continue;
+        // Linha totalmente vazia = fim da lista de produtos.
+        // Tudo abaixo disso é ignorado (espaço livre para suas anotações).
+        if (!linha || linha.every((c) => !String(c).trim())) break;
         const get = (campo) => (idx[campo] >= 0 ? (linha[idx[campo]] || '').trim() : '');
         const nome = get('nome');
         const link = get('link');
