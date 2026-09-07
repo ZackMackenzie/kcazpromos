@@ -102,9 +102,14 @@
     <!-- Grid de produtos -->
     <div id="grid" class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3"></div>
 
-    <!-- Estado vazio -->
+    <!-- Estado: carregando -->
+    <div id="loading" class="py-24 text-center">
+      <p class="text-sm text-neutral-500">Carregando achadinhos...</p>
+    </div>
+
+    <!-- Estado: vazio / erro -->
     <div id="empty" class="hidden py-24 text-center">
-      <p class="text-sm text-neutral-500">Nenhum achadinho encontrado para essa busca.</p>
+      <p id="empty-msg" class="text-sm text-neutral-500">Nenhum achadinho encontrado para essa busca.</p>
     </div>
   </main>
 
@@ -123,17 +128,109 @@
 
   <!-- ======================= SCRIPT ======================= -->
   <script>
-    // Formata valor em BRL
+    // =====================================================
+    //  CONFIGURAÇÃO — cole aqui o link CSV publicado da sua
+    //  planilha do Google (Arquivo → Compartilhar → Publicar
+    //  na web → formato "Valores separados por vírgula (.csv)").
+    //  Enquanto estiver vazio, o site usa o arquivo local
+    //  produtos.csv (bom para testar).
+    // =====================================================
+    const SHEET_CSV_URL = '';
+
+    // Fonte usada quando não há planilha configurada
+    const CSV_LOCAL = 'produtos.csv';
+
+    // ---------- Helpers de formatação ----------
     const brl = (v) =>
       v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
-    // Calcula % de desconto
     const desconto = (antigo, novo) =>
       antigo > novo ? Math.round((1 - novo / antigo) * 100) : 0;
 
-    // Monta o HTML de um card no padrão Vercel Store
+    // Converte "R$ 189,90", "189.90", "189,9", "189" -> 189.9
+    function parsePreco(v) {
+      if (v == null) return 0;
+      let s = String(v).replace(/[^\d.,-]/g, '').trim();
+      if (!s) return 0;
+      if (s.includes(',') && s.includes('.')) s = s.replace(/\./g, '').replace(',', '.');
+      else if (s.includes(',')) s = s.replace(',', '.');
+      const n = parseFloat(s);
+      return isNaN(n) ? 0 : n;
+    }
+
+    // ---------- Parser de CSV (aguenta vírgula e aspas dentro do campo) ----------
+    function parseCSV(text) {
+      const rows = [];
+      let row = [], field = '', inQuotes = false;
+      for (let i = 0; i < text.length; i++) {
+        const c = text[i];
+        if (inQuotes) {
+          if (c === '"') {
+            if (text[i + 1] === '"') { field += '"'; i++; }
+            else inQuotes = false;
+          } else field += c;
+        } else {
+          if (c === '"') inQuotes = true;
+          else if (c === ',') { row.push(field); field = ''; }
+          else if (c === '\n') { row.push(field); rows.push(row); row = []; field = ''; }
+          else if (c === '\r') { /* ignora */ }
+          else field += c;
+        }
+      }
+      if (field.length || row.length) { row.push(field); rows.push(row); }
+      return rows;
+    }
+
+    // Normaliza cabeçalho: "Preço Antigo" -> "precoantigo"
+    const chave = (s) =>
+      (s || '').toString().toLowerCase().normalize('NFD')
+        .replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]/g, '');
+
+    // Aceita vários nomes de coluna para o mesmo campo
+    const ALIASES = {
+      codigo:      ['codigo', 'cod', 'code'],
+      nome:        ['nome', 'produto', 'titulo', 'title', 'name'],
+      precoAntigo: ['precoantigo', 'precode', 'de', 'antigo', 'oldprice'],
+      precoNovo:   ['preconovo', 'precopor', 'por', 'preco', 'price', 'valor'],
+      link:        ['link', 'url', 'afiliado', 'linkafiliado'],
+      imagem:      ['imagem', 'image', 'img', 'foto', 'photo'],
+    };
+
+    function linhasParaProdutos(rows) {
+      if (!rows.length) return [];
+      const header = rows[0].map(chave);
+      const idx = {};
+      for (const campo in ALIASES) {
+        idx[campo] = header.findIndex((h) => ALIASES[campo].includes(h));
+      }
+      const out = [];
+      for (let r = 1; r < rows.length; r++) {
+        const linha = rows[r];
+        if (!linha || linha.every((c) => !String(c).trim())) continue;
+        const get = (campo) => (idx[campo] >= 0 ? (linha[idx[campo]] || '').trim() : '');
+        const nome = get('nome');
+        const link = get('link');
+        if (!nome && !link) continue;
+        let codigo = get('codigo');
+        if (codigo && !codigo.startsWith('#')) codigo = '#' + codigo;
+        out.push({
+          id: r,
+          codigo,
+          nome,
+          precoAntigo: parsePreco(get('precoAntigo')),
+          precoNovo: parsePreco(get('precoNovo')),
+          link: link || '#',
+          imagem: get('imagem'),
+        });
+      }
+      return out;
+    }
+
+    // ---------- Card ----------
     function cardHTML(p) {
       const off = desconto(p.precoAntigo, p.precoNovo);
+      const temPrecoNovo = p.precoNovo > 0;
+      const temPrecoAntigo = p.precoAntigo > 0 && p.precoAntigo > p.precoNovo;
       return `
         <a
           href="${p.link}"
@@ -149,9 +246,11 @@
               loading="lazy"
               class="h-full w-full object-cover transition-transform duration-500 ease-out group-hover:scale-105"
             />
-            <span class="absolute left-3 top-3 rounded-full border border-neutral-700 bg-black/70 px-2.5 py-1 text-[11px] font-semibold tracking-wide text-white backdrop-blur-sm">
-              ${p.codigo}
-            </span>
+            ${
+              p.codigo
+                ? `<span class="absolute left-3 top-3 rounded-full border border-neutral-700 bg-black/70 px-2.5 py-1 text-[11px] font-semibold tracking-wide text-white backdrop-blur-sm">${p.codigo}</span>`
+                : ''
+            }
             ${
               off > 0
                 ? `<span class="absolute right-3 top-3 rounded-full bg-white px-2.5 py-1 text-[11px] font-semibold text-black">-${off}%</span>`
@@ -167,8 +266,8 @@
 
             <div class="mt-auto flex items-end justify-between gap-2">
               <div class="flex flex-col">
-                <span class="text-xs text-neutral-600 line-through">${brl(p.precoAntigo)}</span>
-                <span class="text-lg font-semibold text-white">${brl(p.precoNovo)}</span>
+                ${temPrecoAntigo ? `<span class="text-xs text-neutral-600 line-through">${brl(p.precoAntigo)}</span>` : ''}
+                ${temPrecoNovo ? `<span class="text-lg font-semibold text-white">${brl(p.precoNovo)}</span>` : ''}
               </div>
               <span class="inline-flex items-center gap-1 rounded-lg border border-neutral-700 px-3 py-1.5 text-xs font-medium text-neutral-200 transition-colors duration-200 group-hover:border-white group-hover:bg-white group-hover:text-black">
                 Comprar
@@ -182,17 +281,15 @@
 
     const grid = document.getElementById('grid');
     const empty = document.getElementById('empty');
+    const emptyMsg = document.getElementById('empty-msg');
+    const loading = document.getElementById('loading');
     const search = document.getElementById('search');
 
-    // Normaliza texto para busca (remove acento, caixa, #)
     const norm = (s) =>
-      (s || '')
-        .toString()
-        .toLowerCase()
-        .normalize('NFD')
-        .replace(/[̀-ͯ]/g, '')
-        .replace(/#/g, '')
-        .trim();
+      (s || '').toString().toLowerCase().normalize('NFD')
+        .replace(/[̀-ͯ]/g, '').replace(/#/g, '').trim();
+
+    let PRODUTOS = [];
 
     function render(lista) {
       grid.innerHTML = lista.map(cardHTML).join('');
@@ -211,51 +308,29 @@
 
     search.addEventListener('input', filtrar);
 
-    // =====================================================
-    //  BASE DE DADOS — edite aqui para adicionar/trocar itens
-    //  Campos: id | codigo | nome | precoAntigo | precoNovo | link | imagem
-    // =====================================================
-    const PRODUTOS = [
-      {
-        id: 1,
-        codigo: '#01',
-        nome: 'Luminária de Mesa LED com Carregador Sem Fio',
-        precoAntigo: 189.9,
-        precoNovo: 119.9,
-        link: 'https://exemplo-afiliado.com/produto-01',
-        imagem: 'https://images.unsplash.com/photo-1507473885765-e6ed057f782c?auto=format&fit=crop&w=800&q=80',
-      },
-      {
-        id: 2,
-        codigo: '#02',
-        nome: 'Fone Bluetooth TWS com Cancelamento de Ruído',
-        precoAntigo: 249.0,
-        precoNovo: 159.0,
-        link: 'https://exemplo-afiliado.com/produto-02',
-        imagem: 'https://images.unsplash.com/photo-1590658268037-6bf12165a8df?auto=format&fit=crop&w=800&q=80',
-      },
-      {
-        id: 3,
-        codigo: '#03',
-        nome: 'Organizador de Bancada em Bambu — Kit 3 Peças',
-        precoAntigo: 139.9,
-        precoNovo: 89.9,
-        link: 'https://exemplo-afiliado.com/produto-03',
-        imagem: 'https://images.unsplash.com/photo-1594026112284-02bb6f3352fe?auto=format&fit=crop&w=800&q=80',
-      },
-      {
-        id: 4,
-        codigo: '#04',
-        nome: 'Garrafa Térmica Inox 500ml — Mantém 12h',
-        precoAntigo: 99.9,
-        precoNovo: 59.9,
-        link: 'https://exemplo-afiliado.com/produto-04',
-        imagem: 'https://images.unsplash.com/photo-1602143407151-7111542de6e8?auto=format&fit=crop&w=800&q=80',
-      },
-    ];
+    async function carregar() {
+      const fonte = SHEET_CSV_URL || CSV_LOCAL;
+      try {
+        const resp = await fetch(fonte, { cache: 'no-store' });
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const texto = await resp.text();
+        PRODUTOS = linhasParaProdutos(parseCSV(texto));
+        loading.classList.add('hidden');
+        if (!PRODUTOS.length) {
+          emptyMsg.textContent = 'Nenhum produto na planilha ainda.';
+          render([]);
+          return;
+        }
+        filtrar();
+      } catch (e) {
+        loading.classList.add('hidden');
+        emptyMsg.textContent = 'Não consegui carregar os produtos. Confira o link da planilha.';
+        render([]);
+        console.error('Erro ao carregar produtos:', e);
+      }
+    }
 
-    // Primeira renderização
-    render(PRODUTOS);
+    carregar();
   </script>
 </body>
 </html>
