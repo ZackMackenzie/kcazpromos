@@ -381,7 +381,9 @@
     search.addEventListener('input', filtrar);
 
     async function carregar() {
-      const fonte = SHEET_CSV_URL || CSV_LOCAL;
+      const base = SHEET_CSV_URL || CSV_LOCAL;
+      // Quebra-cache: força buscar a versão mais recente da planilha a cada visita
+      const fonte = base + (base.includes('?') ? '&' : '?') + '_=' + Date.now();
       try {
         const resp = await fetch(fonte, { cache: 'no-store' });
         if (!resp.ok) throw new Error('HTTP ' + resp.status);
