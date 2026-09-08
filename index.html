@@ -9,6 +9,7 @@
 <script src="https://cdn.tailwindcss.com"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link rel="preconnect" href="https://i0.wp.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
 
 <script>
@@ -282,6 +283,15 @@
     // Verifica se o texto é mesmo um endereço (http/https)
     const ehURL = (s) => /^https?:\/\//i.test((s || '').trim());
 
+    // Passa a imagem pelo Photon (CDN de imagens gratuito da Automattic/WordPress):
+    // redimensiona, comprime, serve WebP e tem cache global rápido.
+    // Deixa a foto ~5x mais leve — resolve lentidão de hosts como o postimages.
+    function imgOtimizada(u, tam) {
+      tam = tam || 640;
+      const semProtocolo = u.trim().replace(/^https?:\/\//i, '');
+      return 'https://i0.wp.com/' + semProtocolo + '?resize=' + tam + ',' + tam + '&quality=80';
+    }
+
     // Imagem exibida quando não há URL válida na planilha
     const SEM_IMAGEM =
       'data:image/svg+xml;charset=utf-8,' +
@@ -301,7 +311,12 @@
       const temPrecoNovo = p.precoNovo > 0;
       const temPrecoAntigo = p.precoAntigo > 0 && p.precoAntigo > p.precoNovo;
       const href = ehURL(p.link) ? p.link : '#';
-      const imgSrc = ehURL(p.imagem) ? p.imagem : SEM_IMAGEM;
+      const temImagem = ehURL(p.imagem);
+      const imgSrc = temImagem ? imgOtimizada(p.imagem) : SEM_IMAGEM;
+      // Se o CDN falhar, tenta a imagem original; se essa também falhar, mostra o placeholder.
+      const imgFallback = temImagem
+        ? `this.onerror=function(){this.onerror=null;this.src='${SEM_IMAGEM}'};this.src='${p.imagem.trim().replace(/'/g, "%27")}'`
+        : `this.onerror=null;this.src='${SEM_IMAGEM}'`;
       return `
         <a
           href="${href}"
@@ -315,7 +330,10 @@
               src="${imgSrc}"
               alt="${p.nome}"
               loading="lazy"
-              onerror="this.onerror=null;this.src='${SEM_IMAGEM}'"
+              decoding="async"
+              style="opacity:0;transition:opacity .35s ease"
+              onload="this.style.opacity=1"
+              onerror="${imgFallback}"
               class="h-full w-full object-cover transition-transform duration-500 ease-out group-hover:scale-105"
             />
             ${
